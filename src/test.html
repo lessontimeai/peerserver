@@ -2,100 +2,407 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>P2P Room & Chat Test</title>
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-    <script src="peerclient.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Chat</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; height: 100vh; margin: 0; background: #f0f2f5; }
-        #sidebar { width: 260px; background: #ffffff; border-right: 1px solid #ddd; display: flex; flex-direction: column; }
-        .sidebar-header { padding: 20px; background: #007bff; color: white; }
-        #peer-list { flex: 1; overflow-y: auto; padding: 15px; }
-        .peer-item { padding: 8px 12px; margin-bottom: 5px; background: #f8f9fa; border-radius: 6px; font-size: 0.9em; display: flex; align-items: center; }
-        .dot { height: 8px; width: 8px; background: #28a745; border-radius: 50%; margin-right: 10px; }
-
-        #chat-main { flex: 1; display: flex; flex-direction: column; }
-        #messages { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
-        .msg { max-width: 70%; padding: 10px 15px; border-radius: 18px; font-size: 0.95em; line-height: 1.4; }
-        .msg.received { background: #e4e6eb; align-self: flex-start; }
-        .msg.sent { background: #0084ff; color: white; align-self: flex-end; }
-        .msg-sender { font-size: 0.7em; margin-bottom: 3px; display: block; opacity: 0.8; }
-
-        .input-area { padding: 20px; background: white; border-top: 1px solid #ddd; display: flex; gap: 10px; }
-        input[type="text"] { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 25px; outline: none; }
-        button { padding: 10px 20px; border: none; background: #007bff; color: white; border-radius: 25px; cursor: pointer; font-weight: bold; }
-        button:hover { background: #0056b3; }
+        .scrollbar-custom::-webkit-scrollbar { width: 6px; }
+        .scrollbar-custom::-webkit-scrollbar-track { background: #1f2937; }
+        .scrollbar-custom::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
+        .scrollbar-custom::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
-<body>
+<body class="bg-gray-900 text-gray-100 h-screen font-sans overflow-hidden selection:bg-blue-500 selection:text-white">
 
-<div id="sidebar">
-    <div class="sidebar-header">
-        <h3 style="margin:0">Room Chat</h3>
-        <small id="status">Disconnected</small>
-    </div>
-    <div style="padding: 15px; border-bottom: 1px solid #eee;">
-        <input type="text" id="roomInput" value="general-room" style="width: 70%; padding: 5px;">
-        <button onclick="join()" style="padding: 5px 10px;">Join</button>
-    </div>
-    <div id="peer-list">
+    <!-- LOGIN SCREEN -->
+    <div id="loginScreen" class="fixed inset-0 z-50 bg-gray-900 flex items-center justify-center p-4">
+        <div class="bg-gray-800 p-8 rounded-2xl shadow-2xl w-full max-w-md border border-gray-700">
+            <div class="text-center mb-8">
+                <div class="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg shadow-blue-500/30">
+                    <i class="fas fa-comments text-2xl text-white"></i>
+                </div>
+                <h1 class="text-2xl font-bold">Join Chat Room</h1>
+                <p class="text-gray-400 text-sm mt-2">Secure, P2P, Ephemeral.</p>
+            </div>
+            <form onsubmit="app.join(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Username</label>
+                    <input type="text" id="usernameInput" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-3 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition" placeholder="e.g. Alex" required autocomplete="off">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Room ID</label>
+                    <input type="text" id="roomInput" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-3 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition" placeholder="e.g. dev-team" required autocomplete="off">
+                </div>
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 rounded-lg transition transform active:scale-95 shadow-lg">
+                    Join Room
+                </button>
+            </form>
         </div>
-</div>
-
-<div id="chat-main">
-    <div id="messages"></div>
-    <div class="input-area">
-        <input type="text" id="chatInput" placeholder="Type a message..." onkeypress="if(event.key==='Enter') send()">
-        <button onclick="send()">Send</button>
     </div>
-</div>
 
-<script>
-    const client = new PeerClient('http://localhost:1445');
-
-    async function join() {
-        const roomId = document.getElementById('roomInput').value;
+    <!-- MAIN APP LAYOUT -->
+    <div id="mainApp" class="hidden flex h-full">
         
-        // Handle Peer List updates
-        client.onPeerListUpdate = (peerIds) => {
-            const list = document.getElementById('peer-list');
-            list.innerHTML = '<strong>Online Peers:</strong><br><br>';
-            peerIds.forEach(id => {
-                list.innerHTML += `<div class="peer-item"><span class="dot"></span>${id}</div>`;
-            });
-        };
+        <!-- SIDEBAR (User List) -->
+        <div class="w-64 bg-gray-800 border-r border-gray-700 flex flex-col hidden md:flex">
+            <div class="p-4 border-b border-gray-700">
+                <h2 class="font-bold text-gray-200 flex items-center gap-2">
+                    <i class="fas fa-users text-blue-400"></i> Online Users
+                    <span id="userCount" class="bg-gray-700 text-xs px-2 py-0.5 rounded-full text-gray-300">1</span>
+                </h2>
+            </div>
+            <div id="userList" class="flex-1 overflow-y-auto p-2 space-y-1 scrollbar-custom">
+                <!-- User items injected here -->
+            </div>
+            <div class="p-4 border-t border-gray-700 bg-gray-800/50">
+                <div class="text-xs text-gray-500 mb-1">Your ID</div>
+                <div class="flex items-center justify-between bg-gray-900 rounded p-2 border border-gray-700">
+                    <span id="myDisplayId" class="text-xs font-mono text-gray-300 truncate w-24">...</span>
+                    <button onclick="app.copyId()" class="text-gray-400 hover:text-white"><i class="far fa-copy"></i></button>
+                </div>
+            </div>
+        </div>
 
-        // Handle Messages
-        client.onChatMessage = (data) => {
-            const container = document.getElementById('messages');
-            const isMe = data.peerId === client.myPeerId;
+        <!-- CHAT AREA -->
+        <div class="flex-1 flex flex-col min-w-0 bg-gray-900">
             
-            const msgDiv = document.createElement('div');
-            msgDiv.className = `msg ${isMe ? 'sent' : 'received'}`;
-            msgDiv.innerHTML = `
-                <span class="msg-sender">${isMe ? 'You' : data.peerId}</span>
-                ${data.message}
-            `;
-            
-            container.appendChild(msgDiv);
-            container.scrollTop = container.scrollHeight;
-        };
+            <!-- Chat Header -->
+            <header class="h-16 bg-gray-800/80 backdrop-blur border-b border-gray-700 flex items-center justify-between px-4 sticky top-0 z-10">
+                <div class="flex items-center gap-3">
+                    <button class="md:hidden text-gray-400 hover:text-white" onclick="app.toggleSidebar()">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    <div>
+                        <h1 class="font-bold text-lg flex items-center gap-2">
+                            # <span id="roomTitle">general</span>
+                        </h1>
+                        <div class="text-xs text-green-400 flex items-center gap-1">
+                            <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> Connected
+                        </div>
+                    </div>
+                </div>
+                <button onclick="app.leave()" class="text-red-400 hover:text-red-300 hover:bg-red-400/10 px-3 py-1.5 rounded text-sm transition">
+                    <i class="fas fa-sign-out-alt mr-1"></i> Leave
+                </button>
+            </header>
 
-        client.onStatusChange = (status) => {
-            document.getElementById('status').innerText = status;
-        };
+            <!-- Messages List -->
+            <div id="messages" class="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-custom flex flex-col">
+                <div class="text-center text-gray-600 text-sm py-4">
+                    Welcome to the start of the <span class="font-mono text-blue-500">#<span id="welcomeRoomName">room</span></span>.
+                    <br>Messages are P2P and not saved on any server.
+                </div>
+            </div>
 
-        await client.initialize(roomId);
-    }
+            <!-- Input Area -->
+            <div class="p-4 bg-gray-800/50 border-t border-gray-700">
+                <form onsubmit="app.sendMessage(event)" class="max-w-4xl mx-auto relative flex items-center gap-2">
+                    <input type="text" id="msgInput" class="flex-1 bg-gray-700 border-0 text-white rounded-full px-5 py-3 focus:ring-2 focus:ring-blue-500 focus:bg-gray-600 transition placeholder-gray-400" placeholder="Type a message..." autocomplete="off">
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white w-10 h-10 rounded-full flex items-center justify-center transition shadow-lg transform active:scale-90">
+                        <i class="fas fa-paper-plane text-sm"></i>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
 
-    function send() {
-        const input = document.getElementById('chatInput');
-        if (input.value.trim()) {
-            client.sendMessage(input.value);
-            input.value = '';
+    <!-- MOBILE SIDEBAR OVERLAY -->
+    <div id="mobileSidebar" class="fixed inset-0 z-40 hidden">
+        <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick="app.toggleSidebar()"></div>
+        <div class="absolute left-0 top-0 bottom-0 w-64 bg-gray-800 border-r border-gray-700 flex flex-col transform transition-transform duration-300 translate-x-0">
+             <div class="p-4 border-b border-gray-700 flex justify-between items-center">
+                <h2 class="font-bold">Users</h2>
+                <button onclick="app.toggleSidebar()"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="mobileUserList" class="p-2 space-y-1"></div>
+        </div>
+    </div>
+
+    <script>
+        // --- PeerNetwork Class (Optimized for Chat) ---
+        class PeerNetwork {
+            constructor(options) {
+                this.roomId = options.roomId;
+                this.username = options.username;
+                this.callbacks = options.callbacks;
+                
+                // Config (Supports fallback to lessontime.ai if local server not found)
+                this.config = {
+                    host: window.location.hostname === 'localhost' ? 'localhost' : 'lessontime.ai',
+                    port: window.location.hostname === 'localhost' ? 9000 : 1445,
+                    path: '/peers',
+                    secure: window.location.hostname !== 'localhost',
+                    key: window.location.hostname !== 'localhost' ? ".lessontimepeers." : "peerjs",
+                    token: this.roomId, // Send room ID to server
+                    debug: 1
+                };
+
+                this.peerId = `user-${this.roomId}-${Math.random().toString(36).substr(2, 6)}`;
+                this.connections = new Map(); // peerId -> { conn, username }
+                
+                this.init();
+            }
+
+            init() {
+                this.peer = new Peer(this.peerId, this.config);
+
+                this.peer.on('open', (id) => {
+                    this.callbacks.onOpen(id);
+                    this.connectToRoom();
+                });
+
+                this.peer.on('connection', (conn) => {
+                    this.setupConnection(conn);
+                });
+
+                this.peer.on('error', err => console.error("Peer Error:", err));
+            }
+
+            async connectToRoom() {
+                // Adaptive Discovery: Try custom API, fallback to listAllPeers
+                let peers = [];
+                try {
+                    const protocol = this.config.secure ? 'https' : 'http';
+                    const url = `${protocol}://${this.config.host}:${this.config.port}/api/rooms/${this.roomId}/peers`;
+                    const res = await fetch(url);
+                    if(res.ok) peers = await res.json();
+                } catch(e) { console.log("Custom API failed, trying fallback..."); }
+
+                // Fallback for preview environment
+                if(peers.length === 0 && this.config.host === 'lessontime.ai') {
+                    try {
+                        const url = `https://lessontime.ai:1445/peers/.lessontimepeers./peers`;
+                        const res = await fetch(url);
+                        const all = await res.json();
+                        peers = all.filter(id => id.includes(this.roomId));
+                    } catch(e) {}
+                }
+
+                peers.forEach(pid => {
+                    if(pid !== this.peerId) this.connect(pid);
+                });
+            }
+
+            connect(peerId) {
+                if(this.connections.has(peerId)) return;
+                const conn = this.peer.connect(peerId, {
+                    metadata: { username: this.username }
+                });
+                this.setupConnection(conn);
+            }
+
+            setupConnection(conn) {
+                conn.on('open', () => {
+                    // Send my username immediately
+                    conn.send({ type: 'handshake', username: this.username });
+                    
+                    // If I initiated, I might already have their metadata, but handshake ensures swap
+                    this.handleUserJoin(conn, conn.metadata?.username);
+                });
+
+                conn.on('data', (data) => {
+                    if(data.type === 'handshake') {
+                        this.handleUserJoin(conn, data.username);
+                    } else if(data.type === 'chat') {
+                        this.callbacks.onMessage(data, conn.peer);
+                    }
+                });
+
+                conn.on('close', () => {
+                    this.handleUserLeave(conn.peer);
+                });
+
+                conn.on('error', () => conn.close());
+            }
+
+            handleUserJoin(conn, username) {
+                if(!this.connections.has(conn.peer)) {
+                    // New connection
+                    this.connections.set(conn.peer, { conn, username: username || 'Anonymous' });
+                    this.callbacks.onUserUpdate();
+                    this.callbacks.onSystemMessage(`${username || 'Someone'} joined.`);
+                } else {
+                    // Update existing (e.g. received username late)
+                    const entry = this.connections.get(conn.peer);
+                    entry.username = username || entry.username;
+                    this.connections.set(conn.peer, entry);
+                    this.callbacks.onUserUpdate();
+                }
+            }
+
+            handleUserLeave(peerId) {
+                if(this.connections.has(peerId)) {
+                    const name = this.connections.get(peerId).username;
+                    this.connections.delete(peerId);
+                    this.callbacks.onUserUpdate();
+                    this.callbacks.onSystemMessage(`${name} left.`);
+                }
+            }
+
+            broadcast(msg) {
+                this.connections.forEach(user => {
+                    if(user.conn.open) user.conn.send(msg);
+                });
+            }
         }
-    }
-</script>
 
+        // --- Application Logic ---
+        const app = {
+            network: null,
+            username: '',
+            
+            join(e) {
+                e.preventDefault();
+                const username = document.getElementById('usernameInput').value.trim();
+                const room = document.getElementById('roomInput').value.trim();
+                if(!username || !room) return;
+
+                this.username = username;
+                
+                // Switch UI
+                document.getElementById('loginScreen').classList.add('hidden');
+                document.getElementById('mainApp').classList.remove('hidden');
+                document.getElementById('roomTitle').innerText = room;
+                document.getElementById('welcomeRoomName').innerText = room;
+
+                // Init Network
+                this.network = new PeerNetwork({
+                    roomId: room,
+                    username: username,
+                    callbacks: {
+                        onOpen: (id) => {
+                            document.getElementById('myDisplayId').innerText = id;
+                            this.renderUserList(); // Add myself
+                        },
+                        onMessage: (data, peerId) => {
+                            const sender = this.network.connections.get(peerId)?.username || 'Unknown';
+                            this.addMessageBubble(data.text, sender, false, data.time);
+                        },
+                        onSystemMessage: (text) => {
+                            this.addSystemMessage(text);
+                        },
+                        onUserUpdate: () => {
+                            this.renderUserList();
+                        }
+                    }
+                });
+            },
+
+            sendMessage(e) {
+                e.preventDefault();
+                const input = document.getElementById('msgInput');
+                const text = input.value.trim();
+                if(!text) return;
+
+                const msg = {
+                    type: 'chat',
+                    text: text,
+                    time: new Date().toISOString()
+                };
+
+                // Send to others
+                this.network.broadcast(msg);
+                // Show local
+                this.addMessageBubble(text, 'Me', true, msg.time);
+                input.value = '';
+            },
+
+            addMessageBubble(text, sender, isMe, timeStr) {
+                const container = document.getElementById('messages');
+                const time = new Date(timeStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                
+                const div = document.createElement('div');
+                div.className = `flex flex-col max-w-[80%] ${isMe ? 'self-end items-end' : 'self-start items-start'} fade-in`;
+                
+                const bubble = document.createElement('div');
+                bubble.className = `px-4 py-2 rounded-2xl text-sm shadow-sm ${
+                    isMe 
+                    ? 'bg-blue-600 text-white rounded-br-none' 
+                    : 'bg-gray-700 text-gray-100 rounded-bl-none'
+                }`;
+                bubble.innerText = text;
+
+                const meta = document.createElement('div');
+                meta.className = "text-[10px] text-gray-500 mt-1 px-1";
+                meta.innerText = isMe ? time : `${sender} • ${time}`;
+
+                div.appendChild(bubble);
+                div.appendChild(meta);
+                container.appendChild(div);
+                container.scrollTop = container.scrollHeight;
+            },
+
+            addSystemMessage(text) {
+                const container = document.getElementById('messages');
+                const div = document.createElement('div');
+                div.className = "self-center bg-gray-800/50 text-gray-400 text-xs px-3 py-1 rounded-full my-2";
+                div.innerText = text;
+                container.appendChild(div);
+                container.scrollTop = container.scrollHeight;
+            },
+
+            renderUserList() {
+                const list = document.getElementById('userList');
+                const mobileList = document.getElementById('mobileUserList');
+                
+                // Myself
+                const myHtml = this.createUserItemHtml(this.username, true);
+                
+                // Others
+                let othersHtml = '';
+                this.network.connections.forEach(user => {
+                    othersHtml += this.createUserItemHtml(user.username, false);
+                });
+
+                list.innerHTML = myHtml + othersHtml;
+                mobileList.innerHTML = myHtml + othersHtml;
+                
+                document.getElementById('userCount').innerText = this.network.connections.size + 1;
+            },
+
+            createUserItemHtml(name, isMe) {
+                return `
+                    <div class="flex items-center gap-3 p-2 rounded hover:bg-gray-700/50 transition cursor-default">
+                        <div class="w-8 h-8 rounded-full ${isMe ? 'bg-blue-600' : 'bg-gray-600'} flex items-center justify-center text-xs font-bold text-white">
+                            ${name.substring(0, 2).toUpperCase()}
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-sm font-medium text-gray-200 truncate">
+                                ${name} ${isMe ? '<span class="text-gray-500 text-xs">(You)</span>' : ''}
+                            </div>
+                            <div class="text-xs text-gray-500 flex items-center gap-1">
+                                <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span> Online
+                            </div>
+                        </div>
+                    </div>
+                `;
+            },
+
+            toggleSidebar() {
+                const el = document.getElementById('mobileSidebar');
+                if(el.classList.contains('hidden')) {
+                    el.classList.remove('hidden');
+                } else {
+                    el.classList.add('hidden');
+                }
+            },
+
+            copyId() {
+                navigator.clipboard.writeText(this.network.peerId);
+            },
+
+            leave() {
+                if(confirm("Leave the chat?")) window.location.reload();
+            }
+        };
+
+        // Autofill from URL if present
+        const params = new URLSearchParams(window.location.search);
+        if(params.get('room')) document.getElementById('roomInput').value = params.get('room');
+    </script>
 </body>
 </html>

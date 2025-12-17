@@ -1,86 +1,77 @@
-const http = require('http');
-const https = require('https');
 const express = require('express');
+const { ExpressPeerServer } = require('peer');
+const http = require('http');
 const cors = require('cors');
-const { PeerServer } = require('peer');
-const { Server } = require('socket.io');
-const config = require('./config');
+const path = require('path');
 
 const app = express();
+const port = process.env.PORT || 9000;
 
-app.use(cors({ origin: config.corsOrigin, methods: ['GET', 'POST'] }));
+app.use(cors());
 
-// Simple health endpoint for uptime checks
-app.get('/healthz', (req, res) => {
-  res.json({ status: 'ok' });
+// Serve static files (like index.html) from the current directory
+app.use(express.static(__dirname));
+
+const server = http.createServer(app);
+
+// Initialize PeerJS Server
+// We use ExpressPeerServer to attach to the existing 'server' instance
+// This prevents the "EADDRINUSE" error because we don't try to bind the port twice.
+const peerServer = ExpressPeerServer(server, {
+    path: '/', // We mount this on '/peers' below, so internal path is root
+    proxied: true,
+    allow_discovery: true,
+    debug: true
 });
 
-const nodeServer = config.ssl
-  ? https.createServer(config.ssl, app)
-  : http.createServer(app);
+// Mount the PeerJS middleware on the '/peers' route
+app.use('/peers', peerServer);
 
-const io = new Server(nodeServer, {
-  cors: { origin: config.corsOrigin, methods: ['GET', 'POST'] },
-});
+// --- Real Room Logic ---
+const rooms = {};
 
-const peerServer = PeerServer({
-  path: config.peerPath,
-  key: config.peerKey,
-});
+function addToRoom(roomId, peerId) {
+    if (!rooms[roomId]) rooms[roomId] = new Set();
+    rooms[roomId].add(peerId);
+    console.log(`[Room] ${peerId} joined ${roomId}`);
+}
 
-app.use(config.peerPath, peerServer);
-
-const rooms = new Map();
-
-io.on('connection', (socket) => {
-  let currentRoom = null;
-  let currentPeerId = null;
-
-  socket.on('join-room', (roomId, peerId) => {
-    socket.join(roomId);
-    currentRoom = roomId;
-    currentPeerId = peerId;
-
-    if (!rooms.has(roomId)) {
-      rooms.set(roomId, new Set());
-    }
-
-    const roomPeers = rooms.get(roomId);
-    const existingPeers = Array.from(roomPeers)
-      .filter((p) => p.socketId !== socket.id)
-      .map((p) => p.peerId);
-
-    roomPeers.add({ socketId: socket.id, peerId });
-
-    socket.emit('room-peers', existingPeers);
-    socket.to(roomId).emit('peer-joined', peerId);
-  });
-
-  socket.on('disconnect', () => {
-    if (currentRoom && currentPeerId) {
-      socket.to(currentRoom).emit('peer-left', currentPeerId);
-
-      const room = rooms.get(currentRoom);
-      if (room) {
-        room.forEach((p) => {
-          if (p.socketId === socket.id) {
-            room.delete(p);
-          }
-        });
-
-        if (room.size === 0) {
-          rooms.delete(currentRoom);
+function removeFromRoom(peerId) {
+    for (const [roomId, peers] of Object.entries(rooms)) {
+        if (peers.has(peerId)) {
+            peers.delete(peerId);
+            console.log(`[Room] ${peerId} left ${roomId}`);
+            if (peers.size === 0) delete rooms[roomId];
         }
-      }
     }
-  });
+}
+
+// Access the internal realm events
+peerServer.on('connection', (client) => {
+    // Client token is passed via query params during connection
+    const roomId = client.token;
+    const peerId = client.getId();
+    if (roomId) addToRoom(roomId, peerId);
 });
 
-nodeServer.listen(config.port, config.host, () => {
-  const protocol = config.ssl ? 'https' : 'http';
-  console.log(
-    `Server running on ${protocol}://${config.domain}:${config.port}${config.peerPath}`
-  );
+peerServer.on('disconnect', (client) => {
+    const peerId = client.getId();
+    removeFromRoom(peerId);
 });
 
-module.exports = nodeServer;
+// --- API Endpoints ---
+app.get('/api/rooms/:roomId/peers', (req, res) => {
+    const { roomId } = req.params;
+    const peers = rooms[roomId] ? Array.from(rooms[roomId]) : [];
+    res.json(peers);
+});
+
+// Serve the app on root
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+server.listen(port, () => {
+    console.log(`Chat App running at http://localhost:${port}`);
+    console.log(`PeerJS endpoint: http://localhost:${port}/peers`);
+});
