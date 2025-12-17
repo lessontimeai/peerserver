@@ -23,11 +23,12 @@ const io = new Server(nodeServer, {
   cors: { origin: config.corsOrigin, methods: ['GET', 'POST'] },
 });
 
-PeerServer({
-  server: nodeServer,
+const peerServer = PeerServer({
   path: config.peerPath,
   key: config.peerKey,
 });
+
+app.use(config.peerPath, peerServer);
 
 const rooms = new Map();
 

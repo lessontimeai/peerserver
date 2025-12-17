@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>P2P Room & Chat Test</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="peerclient.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; height: 100vh; margin: 0; background: #f0f2f5; }
+        #sidebar { width: 260px; background: #ffffff; border-right: 1px solid #ddd; display: flex; flex-direction: column; }
+        .sidebar-header { padding: 20px; background: #007bff; color: white; }
+        #peer-list { flex: 1; overflow-y: auto; padding: 15px; }
+        .peer-item { padding: 8px 12px; margin-bottom: 5px; background: #f8f9fa; border-radius: 6px; font-size: 0.9em; display: flex; align-items: center; }
+        .dot { height: 8px; width: 8px; background: #28a745; border-radius: 50%; margin-right: 10px; }
+
+        #chat-main { flex: 1; display: flex; flex-direction: column; }
+        #messages { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+        .msg { max-width: 70%; padding: 10px 15px; border-radius: 18px; font-size: 0.95em; line-height: 1.4; }
+        .msg.received { background: #e4e6eb; align-self: flex-start; }
+        .msg.sent { background: #0084ff; color: white; align-self: flex-end; }
+        .msg-sender { font-size: 0.7em; margin-bottom: 3px; display: block; opacity: 0.8; }
+
+        .input-area { padding: 20px; background: white; border-top: 1px solid #ddd; display: flex; gap: 10px; }
+        input[type="text"] { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 25px; outline: none; }
+        button { padding: 10px 20px; border: none; background: #007bff; color: white; border-radius: 25px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #0056b3; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <div class="sidebar-header">
+        <h3 style="margin:0">Room Chat</h3>
+        <small id="status">Disconnected</small>
+    </div>
+    <div style="padding: 15px; border-bottom: 1px solid #eee;">
+        <input type="text" id="roomInput" value="general-room" style="width: 70%; padding: 5px;">
+        <button onclick="join()" style="padding: 5px 10px;">Join</button>
+    </div>
+    <div id="peer-list">
+        </div>
+</div>
+
+<div id="chat-main">
+    <div id="messages"></div>
+    <div class="input-area">
+        <input type="text" id="chatInput" placeholder="Type a message..." onkeypress="if(event.key==='Enter') send()">
+        <button onclick="send()">Send</button>
+    </div>
+</div>
+
+<script>
+    const client = new PeerClient('http://localhost:1445');
+
+    async function join() {
+        const roomId = document.getElementById('roomInput').value;
+        
+        // Handle Peer List updates
+        client.onPeerListUpdate = (peerIds) => {
+            const list = document.getElementById('peer-list');
+            list.innerHTML = '<strong>Online Peers:</strong><br><br>';
+            peerIds.forEach(id => {
+                list.innerHTML += `<div class="peer-item"><span class="dot"></span>${id}</div>`;
+            });
+        };
+
+        // Handle Messages
+        client.onChatMessage = (data) => {
+            const container = document.getElementById('messages');
+            const isMe = data.peerId === client.myPeerId;
+            
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `msg ${isMe ? 'sent' : 'received'}`;
+            msgDiv.innerHTML = `
+                <span class="msg-sender">${isMe ? 'You' : data.peerId}</span>
+                ${data.message}
+            `;
+            
+            container.appendChild(msgDiv);
+            container.scrollTop = container.scrollHeight;
+        };
+
+        client.onStatusChange = (status) => {
+            document.getElementById('status').innerText = status;
+        };
+
+        await client.initialize(roomId);
+    }
+
+    function send() {
+        const input = document.getElementById('chatInput');
+        if (input.value.trim()) {
+            client.sendMessage(input.value);
+            input.value = '';
+        }
+    }
+</script>
+
+</body>
+</html>
