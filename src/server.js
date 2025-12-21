@@ -1,11 +1,12 @@
 const express = require('express');
-const { ExpressPeerServer } = require('peer');
+const { PeerServer } = require('peer');
 const http = require('http');
 const cors = require('cors');
 const path = require('path');
+const { Server } = require("socket.io");
 
 const app = express();
-const port = process.env.PORT || 9000;
+const port = process.env.PORT || 1444;
 
 app.use(cors());
 
@@ -13,51 +14,49 @@ app.use(cors());
 app.use(express.static(__dirname));
 
 const server = http.createServer(app);
-
-// Initialize PeerJS Server
-// We use ExpressPeerServer to attach to the existing 'server' instance
-// This prevents the "EADDRINUSE" error because we don't try to bind the port twice.
-const peerServer = ExpressPeerServer(server, {
-    path: '/', // We mount this on '/peers' below, so internal path is root
-    proxied: true,
-    allow_discovery: true,
-    debug: true
+const io = new Server(server, {
+  cors: {
+    origin: "*", // Allow all origins for simplicity
+  },
 });
 
-// Mount the PeerJS middleware on the '/peers' route
-app.use('/peers', peerServer);
+// --- Dedicated PeerJS server ---
+const peerServer = PeerServer({
+  port: 1445,
+  path: '/peers',
+  allow_discovery: true,
+  debug: true,
+});
 
 // --- Real Room Logic ---
 const rooms = {};
 
-function addToRoom(roomId, peerId) {
-    if (!rooms[roomId]) rooms[roomId] = new Set();
-    rooms[roomId].add(peerId);
-    console.log(`[Room] ${peerId} joined ${roomId}`);
-}
+// --- Socket.IO Signaling Logic ---
+io.on('connection', (socket) => {
+  console.log('a user connected:', socket.id);
 
-function removeFromRoom(peerId) {
-    for (const [roomId, peers] of Object.entries(rooms)) {
-        if (peers.has(peerId)) {
-            peers.delete(peerId);
-            console.log(`[Room] ${peerId} left ${roomId}`);
-            if (peers.size === 0) delete rooms[roomId];
-        }
+  socket.on('join-room', (roomId, peerId) => {
+    socket.join(roomId);
+    socket.to(roomId).emit('peer-joined', peerId); // Inform others in the room
+    
+    // Send the list of existing peers to the new user
+    const room = io.sockets.adapter.rooms.get(roomId);
+    if (room) {
+      const peers = Array.from(room).map(id => io.sockets.sockets.get(id).peerId).filter(Boolean);
+      socket.emit('room-peers', peers);
     }
-}
+    
+    // Store peerId on the socket object for later retrieval
+    socket.peerId = peerId; 
+  });
 
-// Access the internal realm events
-peerServer.on('connection', (client) => {
-    // Client token is passed via query params during connection
-    const roomId = client.token;
-    const peerId = client.getId();
-    if (roomId) addToRoom(roomId, peerId);
+  socket.on('disconnect', () => {
+    console.log('user disconnected:', socket.id);
+    // You might want to emit a 'peer-left' event to the room
+    // The logic to find which room the peer was in would be needed here
+  });
 });
 
-peerServer.on('disconnect', (client) => {
-    const peerId = client.getId();
-    removeFromRoom(peerId);
-});
 
 // --- API Endpoints ---
 app.get('/api/rooms/:roomId/peers', (req, res) => {

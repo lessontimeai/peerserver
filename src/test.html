@@ -122,287 +122,175 @@
         </div>
     </div>
 
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js" integrity="sha384-mkQ3/7FUtcGyoppY6bz/PORYoGqOl7/aSUMn2ymDOJcapfS6PHqxhRTMh1RR0Q6+" crossorigin="anonymous"></script>
+    <script src="peerclient.js"></script>
     <script>
-        // --- PeerNetwork Class (Optimized for Chat) ---
-        class PeerNetwork {
-            constructor(options) {
-                this.roomId = options.roomId;
-                this.username = options.username;
-                this.callbacks = options.callbacks;
-                
-                // Config (Supports fallback to lessontime.ai if local server not found)
-                this.config = {
-                    host: window.location.hostname === 'localhost' ? 'localhost' : 'lessontime.ai',
-                    port: window.location.hostname === 'localhost' ? 9000 : 1445,
-                    path: '/peers',
-                    secure: window.location.hostname !== 'localhost',
-                    key: window.location.hostname !== 'localhost' ? ".lessontimepeers." : "peerjs",
-                    token: this.roomId, // Send room ID to server
-                    debug: 1
-                };
-
-                this.peerId = `user-${this.roomId}-${Math.random().toString(36).substr(2, 6)}`;
-                this.connections = new Map(); // peerId -> { conn, username }
-                
-                this.init();
-            }
-
-            init() {
-                this.peer = new Peer(this.peerId, this.config);
-
-                this.peer.on('open', (id) => {
-                    this.callbacks.onOpen(id);
-                    this.connectToRoom();
-                });
-
-                this.peer.on('connection', (conn) => {
-                    this.setupConnection(conn);
-                });
-
-                this.peer.on('error', err => console.error("Peer Error:", err));
-            }
-
-            async connectToRoom() {
-                // Adaptive Discovery: Try custom API, fallback to listAllPeers
-                let peers = [];
-                try {
-                    const protocol = this.config.secure ? 'https' : 'http';
-                    const url = `${protocol}://${this.config.host}:${this.config.port}/api/rooms/${this.roomId}/peers`;
-                    const res = await fetch(url);
-                    if(res.ok) peers = await res.json();
-                } catch(e) { console.log("Custom API failed, trying fallback..."); }
-
-                // Fallback for preview environment
-                if(peers.length === 0 && this.config.host === 'lessontime.ai') {
-                    try {
-                        const url = `https://lessontime.ai:1445/peers/.lessontimepeers./peers`;
-                        const res = await fetch(url);
-                        const all = await res.json();
-                        peers = all.filter(id => id.includes(this.roomId));
-                    } catch(e) {}
-                }
-
-                peers.forEach(pid => {
-                    if(pid !== this.peerId) this.connect(pid);
-                });
-            }
-
-            connect(peerId) {
-                if(this.connections.has(peerId)) return;
-                const conn = this.peer.connect(peerId, {
-                    metadata: { username: this.username }
-                });
-                this.setupConnection(conn);
-            }
-
-            setupConnection(conn) {
-                conn.on('open', () => {
-                    // Send my username immediately
-                    conn.send({ type: 'handshake', username: this.username });
-                    
-                    // If I initiated, I might already have their metadata, but handshake ensures swap
-                    this.handleUserJoin(conn, conn.metadata?.username);
-                });
-
-                conn.on('data', (data) => {
-                    if(data.type === 'handshake') {
-                        this.handleUserJoin(conn, data.username);
-                    } else if(data.type === 'chat') {
-                        this.callbacks.onMessage(data, conn.peer);
-                    }
-                });
-
-                conn.on('close', () => {
-                    this.handleUserLeave(conn.peer);
-                });
-
-                conn.on('error', () => conn.close());
-            }
-
-            handleUserJoin(conn, username) {
-                if(!this.connections.has(conn.peer)) {
-                    // New connection
-                    this.connections.set(conn.peer, { conn, username: username || 'Anonymous' });
-                    this.callbacks.onUserUpdate();
-                    this.callbacks.onSystemMessage(`${username || 'Someone'} joined.`);
-                } else {
-                    // Update existing (e.g. received username late)
-                    const entry = this.connections.get(conn.peer);
-                    entry.username = username || entry.username;
-                    this.connections.set(conn.peer, entry);
-                    this.callbacks.onUserUpdate();
-                }
-            }
-
-            handleUserLeave(peerId) {
-                if(this.connections.has(peerId)) {
-                    const name = this.connections.get(peerId).username;
-                    this.connections.delete(peerId);
-                    this.callbacks.onUserUpdate();
-                    this.callbacks.onSystemMessage(`${name} left.`);
-                }
-            }
-
-            broadcast(msg) {
-                this.connections.forEach(user => {
-                    if(user.conn.open) user.conn.send(msg);
-                });
-            }
-        }
-
-        // --- Application Logic ---
         const app = {
-            network: null,
+            peerClient: null,
             username: '',
-            
-            join(e) {
-                e.preventDefault();
-                const username = document.getElementById('usernameInput').value.trim();
-                const room = document.getElementById('roomInput').value.trim();
-                if(!username || !room) return;
+            roomId: '',
+            isSidebarOpen: false,
 
-                this.username = username;
-                
-                // Switch UI
-                document.getElementById('loginScreen').classList.add('hidden');
-                document.getElementById('mainApp').classList.remove('hidden');
-                document.getElementById('roomTitle').innerText = room;
-                document.getElementById('welcomeRoomName').innerText = room;
-
-                // Init Network
-                this.network = new PeerNetwork({
-                    roomId: room,
-                    username: username,
-                    callbacks: {
-                        onOpen: (id) => {
-                            document.getElementById('myDisplayId').innerText = id;
-                            this.renderUserList(); // Add myself
-                        },
-                        onMessage: (data, peerId) => {
-                            const sender = this.network.connections.get(peerId)?.username || 'Unknown';
-                            this.addMessageBubble(data.text, sender, false, data.time);
-                        },
-                        onSystemMessage: (text) => {
-                            this.addSystemMessage(text);
-                        },
-                        onUserUpdate: () => {
-                            this.renderUserList();
-                        }
-                    }
-                });
+            ui: {
+                loginScreen: document.getElementById('loginScreen'),
+                mainApp: document.getElementById('mainApp'),
+                usernameInput: document.getElementById('usernameInput'),
+                roomInput: document.getElementById('roomInput'),
+                userList: document.getElementById('userList'),
+                mobileUserList: document.getElementById('mobileUserList'),
+                messages: document.getElementById('messages'),
+                msgInput: document.getElementById('msgInput'),
+                myDisplayId: document.getElementById('myDisplayId'),
+                userCount: document.getElementById('userCount'),
+                roomTitle: document.getElementById('roomTitle'),
+                welcomeRoomName: document.getElementById('welcomeRoomName'),
+                mobileSidebar: document.getElementById('mobileSidebar'),
             },
 
-            sendMessage(e) {
-                e.preventDefault();
-                const input = document.getElementById('msgInput');
-                const text = input.value.trim();
-                if(!text) return;
+            async join(event) {
+                event.preventDefault();
+                this.username = this.ui.usernameInput.value.trim();
+                this.roomId = this.ui.roomInput.value.trim();
 
-                const msg = {
-                    type: 'chat',
-                    text: text,
-                    time: new Date().toISOString()
+                if (!this.username || !this.roomId) {
+                    alert('Username and Room ID are required.');
+                    return;
+                }
+
+                // --- Use peerserver.js for signaling, not a separate server ---
+                const SIGNALING_SERVER_URL = `http://localhost:1444`; // The main http server
+                this.peerClient = new PeerClient(SIGNALING_SERVER_URL, '/peers', 'peerjs');
+                
+                this.setupPeerClientCallbacks();
+
+                try {
+                    const peerId = await this.peerClient.initialize(this.roomId);
+                    this.ui.myDisplayId.textContent = this.getShortId(peerId);
+                    this.ui.roomTitle.textContent = this.roomId;
+                    this.ui.welcomeRoomName.textContent = this.roomId;
+
+                    this.ui.loginScreen.classList.add('hidden');
+                    this.ui.mainApp.classList.remove('hidden');
+                    this.ui.msgInput.focus();
+                } catch (err) {
+                    console.error("Initialization failed:", err);
+                    alert(`Error: ${err.message || err.type}. Could not connect to the server.`);
+                }
+            },
+            
+            setupPeerClientCallbacks() {
+                this.peerClient.onPeerListUpdate = (peers) => {
+                    this.updateUserList(peers);
                 };
 
-                // Send to others
-                this.network.broadcast(msg);
-                // Show local
-                this.addMessageBubble(text, 'Me', true, msg.time);
-                input.value = '';
+                this.peerClient.onChatMessage = (data) => {
+                    this.addMessage(data);
+                };
+
+                this.peerClient.onStatusChange = (status) => {
+                    console.log("Status:", status);
+                };
             },
 
-            addMessageBubble(text, sender, isMe, timeStr) {
-                const container = document.getElementById('messages');
-                const time = new Date(timeStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            updateUserList(peerIds) {
+                const fullPeerList = [this.peerClient.myPeerId, ...peerIds.filter(id => id !== this.peerClient.myPeerId)];
+                this.ui.userCount.textContent = fullPeerList.length;
                 
-                const div = document.createElement('div');
-                div.className = `flex flex-col max-w-[80%] ${isMe ? 'self-end items-end' : 'self-start items-start'} fade-in`;
-                
-                const bubble = document.createElement('div');
-                bubble.className = `px-4 py-2 rounded-2xl text-sm shadow-sm ${
-                    isMe 
-                    ? 'bg-blue-600 text-white rounded-br-none' 
-                    : 'bg-gray-700 text-gray-100 rounded-bl-none'
-                }`;
-                bubble.innerText = text;
-
-                const meta = document.createElement('div');
-                meta.className = "text-[10px] text-gray-500 mt-1 px-1";
-                meta.innerText = isMe ? time : `${sender} • ${time}`;
-
-                div.appendChild(bubble);
-                div.appendChild(meta);
-                container.appendChild(div);
-                container.scrollTop = container.scrollHeight;
-            },
-
-            addSystemMessage(text) {
-                const container = document.getElementById('messages');
-                const div = document.createElement('div');
-                div.className = "self-center bg-gray-800/50 text-gray-400 text-xs px-3 py-1 rounded-full my-2";
-                div.innerText = text;
-                container.appendChild(div);
-                container.scrollTop = container.scrollHeight;
-            },
-
-            renderUserList() {
-                const list = document.getElementById('userList');
-                const mobileList = document.getElementById('mobileUserList');
-                
-                // Myself
-                const myHtml = this.createUserItemHtml(this.username, true);
-                
-                // Others
-                let othersHtml = '';
-                this.network.connections.forEach(user => {
-                    othersHtml += this.createUserItemHtml(user.username, false);
-                });
-
-                list.innerHTML = myHtml + othersHtml;
-                mobileList.innerHTML = myHtml + othersHtml;
-                
-                document.getElementById('userCount').innerText = this.network.connections.size + 1;
-            },
-
-            createUserItemHtml(name, isMe) {
-                return `
-                    <div class="flex items-center gap-3 p-2 rounded hover:bg-gray-700/50 transition cursor-default">
-                        <div class="w-8 h-8 rounded-full ${isMe ? 'bg-blue-600' : 'bg-gray-600'} flex items-center justify-center text-xs font-bold text-white">
-                            ${name.substring(0, 2).toUpperCase()}
-                        </div>
-                        <div class="flex-1 min-w-0">
-                            <div class="text-sm font-medium text-gray-200 truncate">
-                                ${name} ${isMe ? '<span class="text-gray-500 text-xs">(You)</span>' : ''}
-                            </div>
-                            <div class="text-xs text-gray-500 flex items-center gap-1">
-                                <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span> Online
+                const userHtml = fullPeerList.map(peerId => {
+                    const isMe = peerId === this.peerClient.myPeerId;
+                    return `
+                        <div class="flex items-center gap-3 p-2 rounded-md ${isMe ? 'bg-blue-600/20' : ''}">
+                            <div class="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center text-sm font-bold">${this.getShortId(peerId).substring(0, 2)}</div>
+                            <div class="flex-1">
+                                <p class="text-sm font-semibold truncate">${this.getShortId(peerId)} ${isMe ? '<span class="text-xs text-gray-400">(You)</span>' : ''}</p>
                             </div>
                         </div>
+                    `;
+                }).join('');
+
+                this.ui.userList.innerHTML = userHtml;
+                this.ui.mobileUserList.innerHTML = userHtml;
+            },
+
+            addMessage({ body, isLocal = false, sender = 'Anonymous' }) {
+                const messageDiv = document.createElement('div');
+                const senderName = isLocal ? this.username : sender;
+                const alignClass = isLocal ? 'justify-end' : 'justify-start';
+                const bubbleColor = isLocal ? 'bg-blue-600' : 'bg-gray-700';
+                
+                messageDiv.className = `flex ${alignClass} fade-in`;
+                messageDiv.innerHTML = `
+                    <div class="max-w-xs lg:max-w-md px-4 py-2 rounded-2xl ${bubbleColor}">
+                        ${!isLocal ? `<div class="text-xs font-bold text-blue-300 mb-1">${senderName}</div>` : ''}
+                        <p class="text-sm">${this.escapeHTML(body)}</p>
                     </div>
                 `;
+                this.ui.messages.appendChild(messageDiv);
+                this.ui.messages.scrollTop = this.ui.messages.scrollHeight;
             },
 
-            toggleSidebar() {
-                const el = document.getElementById('mobileSidebar');
-                if(el.classList.contains('hidden')) {
-                    el.classList.remove('hidden');
-                } else {
-                    el.classList.add('hidden');
+            sendMessage(event) {
+                event.preventDefault();
+                const msg = this.ui.msgInput.value.trim();
+                if (msg && this.peerClient) {
+                    this.peerClient.sendMessage(msg, { sender: this.username });
+                    this.ui.msgInput.value = '';
                 }
-            },
-
-            copyId() {
-                navigator.clipboard.writeText(this.network.peerId);
             },
 
             leave() {
-                if(confirm("Leave the chat?")) window.location.reload();
+                if (this.peerClient) {
+                    this.peerClient.disconnect();
+                }
+                this.ui.mainApp.classList.add('hidden');
+                this.ui.loginScreen.classList.remove('hidden');
+                this.resetUI();
+            },
+            
+            resetUI() {
+                this.ui.userList.innerHTML = '';
+                this.ui.mobileUserList.innerHTML = '';
+                this.ui.messages.innerHTML = '';
+                this.ui.msgInput.value = '';
+            },
+
+            copyId() {
+                if(this.peerClient && this.peerClient.myPeerId) {
+                    navigator.clipboard.writeText(this.peerClient.myPeerId)
+                        .then(() => alert('Your Peer ID has been copied!'))
+                        .catch(err => console.error('Failed to copy ID: ', err));
+                }
+            },
+
+            toggleSidebar() {
+                this.isSidebarOpen = !this.isSidebarOpen;
+                if (this.isSidebarOpen) {
+                    this.ui.mobileSidebar.classList.remove('hidden');
+                    // Add class to trigger animation
+                } else {
+                    this.ui.mobileSidebar.classList.add('hidden');
+                }
+            },
+
+            getShortId(id) {
+                return id ? `...${id.slice(-6)}` : '...';
+            },
+
+            escapeHTML(str) {
+                const p = document.createElement('p');
+                p.appendChild(document.createTextNode(str));
+                return p.innerHTML;
             }
         };
 
-        // Autofill from URL if present
-        const params = new URLSearchParams(window.location.search);
-        if(params.get('room')) document.getElementById('roomInput').value = params.get('room');
+        // Auto-fill room from URL query param for easier testing
+        document.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const room = urlParams.get('room');
+            if (room) {
+                app.ui.roomInput.value = room;
+            }
+        });
     </script>
 </body>
 </html>
