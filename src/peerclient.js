@@ -134,10 +134,10 @@ class PeerClient {
   disconnect() {
     this.updateStatus("Disconnecting...");
     if (this.socket) {
-        this.socket.disconnect();
+      this.socket.disconnect();
     }
     if (this.peer) {
-        this.peer.destroy();
+      this.peer.destroy();
     }
     this.connections = {};
     this.updateStatus("Disconnected");

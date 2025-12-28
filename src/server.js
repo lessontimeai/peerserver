@@ -24,7 +24,7 @@ const io = new Server(server, {
 const peerServer = PeerServer({
   port: 1445,
   path: '/peers',
-  allow_discovery: true,
+  allow_discovery: false,
   debug: true,
 });
 
@@ -38,16 +38,16 @@ io.on('connection', (socket) => {
   socket.on('join-room', (roomId, peerId) => {
     socket.join(roomId);
     socket.to(roomId).emit('peer-joined', peerId); // Inform others in the room
-    
+
     // Send the list of existing peers to the new user
     const room = io.sockets.adapter.rooms.get(roomId);
     if (room) {
       const peers = Array.from(room).map(id => io.sockets.sockets.get(id).peerId).filter(Boolean);
       socket.emit('room-peers', peers);
     }
-    
+
     // Store peerId on the socket object for later retrieval
-    socket.peerId = peerId; 
+    socket.peerId = peerId;
   });
 
   socket.on('disconnect', () => {
@@ -60,17 +60,17 @@ io.on('connection', (socket) => {
 
 // --- API Endpoints ---
 app.get('/api/rooms/:roomId/peers', (req, res) => {
-    const { roomId } = req.params;
-    const peers = rooms[roomId] ? Array.from(rooms[roomId]) : [];
-    res.json(peers);
+  const { roomId } = req.params;
+  const peers = rooms[roomId] ? Array.from(rooms[roomId]) : [];
+  res.json(peers);
 });
 
 // Serve the app on root
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 server.listen(port, () => {
-    console.log(`Chat App running at http://localhost:${port}`);
-    console.log(`PeerJS endpoint: http://localhost:${port}/peers`);
+  console.log(`Chat App running at http://localhost:${port}`);
+  console.log(`PeerJS endpoint: http://localhost:1445/peers`);
 });

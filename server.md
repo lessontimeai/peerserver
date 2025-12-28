@@ -19,80 +19,79 @@ mkdir ssl
 
 ### `src/server.js`
 ```javascript
-const http = require('http');
-const https = require('https');
 const express = require('express');
-const cors = require('cors');
 const { PeerServer } = require('peer');
-const { Server } = require('socket.io');
-const config = require('./config');
+const http = require('http');
+const cors = require('cors');
+const path = require('path');
+const { Server } = require("socket.io");
 
 const app = express();
+const port = process.env.PORT || 1444;
 
-app.use(cors({ origin: config.corsOrigin, methods: ['GET', 'POST'] }));
+app.use(cors());
 
-app.get('/healthz', (req, res) => {
-  res.json({ status: 'ok' });
+// Serve static files (like index.html) from the current directory
+app.use(express.static(__dirname));
+
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*", // Allow all origins for simplicity
+  },
 });
 
-const nodeServer = config.ssl
-  ? https.createServer(config.ssl, app)
-  : http.createServer(app);
-
-const io = new Server(nodeServer, {
-  cors: { origin: config.corsOrigin, methods: ['GET', 'POST'] }
+// --- Dedicated PeerJS server ---
+const peerServer = PeerServer({
+  port: 1445,
+  path: '/peers',
+  allow_discovery: true,
+  debug: true,
 });
 
-PeerServer({
-  server: nodeServer,
-  path: config.peerPath,
-  key: config.peerKey
-});
+// --- Real Room Logic ---
+const rooms = {};
 
-const rooms = new Map();
-
+// --- Socket.IO Signaling Logic ---
 io.on('connection', (socket) => {
-  let currentRoom = null;
-  let currentPeerId = null;
+  console.log('a user connected:', socket.id);
 
   socket.on('join-room', (roomId, peerId) => {
     socket.join(roomId);
-    currentRoom = roomId;
-    currentPeerId = peerId;
-
-    if (!rooms.has(roomId)) {
-      rooms.set(roomId, new Set());
+    socket.to(roomId).emit('peer-joined', peerId); // Inform others in the room
+    
+    // Send the list of existing peers to the new user
+    const room = io.sockets.adapter.rooms.get(roomId);
+    if (room) {
+      const peers = Array.from(room).map(id => io.sockets.sockets.get(id).peerId).filter(Boolean);
+      socket.emit('room-peers', peers);
     }
-
-    const roomPeers = rooms.get(roomId);
-    const existingPeers = Array.from(roomPeers)
-      .filter(p => p.socketId !== socket.id)
-      .map(p => p.peerId);
-
-    roomPeers.add({ socketId: socket.id, peerId });
-
-    socket.emit('room-peers', existingPeers);
-    socket.to(roomId).emit('peer-joined', peerId);
+    
+    // Store peerId on the socket object for later retrieval
+    socket.peerId = peerId; 
   });
 
   socket.on('disconnect', () => {
-    if (currentRoom && currentPeerId) {
-      socket.to(currentRoom).emit('peer-left', currentPeerId);
-
-      const room = rooms.get(currentRoom);
-      if (room) {
-        room.forEach(p => {
-          if (p.socketId === socket.id) room.delete(p);
-        });
-        if (room.size === 0) rooms.delete(currentRoom);
-      }
-    }
+    console.log('user disconnected:', socket.id);
   });
 });
 
-nodeServer.listen(config.port, config.host, () => {
-  const protocol = config.ssl ? 'https' : 'http';
-  console.log(`Server running on ${protocol}://${config.domain}:${config.port}`);
+
+// --- API Endpoints ---
+app.get('/api/rooms/:roomId/peers', (req, res) => {
+    const { roomId } = req.params;
+    const peers = rooms[roomId] ? Array.from(rooms[roomId]) : [];
+    res.json(peers);
+});
+
+// Serve the app on root
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+server.listen(port, () => {
+    console.log(`Chat App running at http://localhost:${port}`);
+    console.log(`PeerJS endpoint: http://localhost:${port}/peers`);
 });
 ```
 
@@ -100,12 +99,15 @@ nodeServer.listen(config.port, config.host, () => {
 
 ```javascript
 // Connect to servers
-const socket = io('https://lessontime.ai');
+// Connect to servers
+// Port 1444: Main App Server + Socket.IO
+const socket = io('http://localhost:1444');
+
+// Port 1445: Dedicated PeerJS Server
 const peer = new Peer(undefined, {
-  host: 'lessontime.ai',
+  host: 'localhost',
   port: 1445,
-  path: '/peers',
-  secure: true
+  path: '/peers'
 });
 
 const connections = new Map();
