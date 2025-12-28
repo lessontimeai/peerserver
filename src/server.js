@@ -1,9 +1,12 @@
 const express = require('express');
 const { PeerServer } = require('peer');
 const http = require('http');
+const https = require('https');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const { Server } = require("socket.io");
+require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 1444;
@@ -13,7 +16,34 @@ app.use(cors());
 // Serve static files (like index.html) from the current directory
 app.use(express.static(__dirname));
 
-const server = http.createServer(app);
+let server;
+let sslOptions = {};
+let isSSL = false;
+
+// Check for SSL configuration
+const sslKeyPath = process.env.SSL_KEY_PATH;
+const sslCertPath = process.env.SSL_CERT_PATH;
+
+if (sslKeyPath && sslCertPath) {
+  try {
+    // Resolve paths relative to cwd or use absolute
+    const key = fs.readFileSync(path.resolve(sslKeyPath));
+    const cert = fs.readFileSync(path.resolve(sslCertPath));
+
+    sslOptions = { key, cert };
+    server = https.createServer(sslOptions, app);
+    isSSL = true;
+    console.log('SSL configuration found and loaded. Starting in HTTPS mode.');
+  } catch (error) {
+    console.error('SSL paths provided but failed to load certificates:', error.message);
+    console.log('Falling back to HTTP...');
+    server = http.createServer(app);
+  }
+} else {
+  console.log('No SSL configuration found. Starting in HTTP mode.');
+  server = http.createServer(app);
+}
+
 const io = new Server(server, {
   cors: {
     origin: "*", // Allow all origins for simplicity
@@ -21,12 +51,18 @@ const io = new Server(server, {
 });
 
 // --- Dedicated PeerJS server ---
-const peerServer = PeerServer({
+const peerOptions = {
   port: 1445,
   path: '/peers',
   allow_discovery: false,
   debug: true,
-});
+};
+
+if (isSSL) {
+  peerOptions.ssl = sslOptions;
+}
+
+const peerServer = PeerServer(peerOptions);
 
 // --- Real Room Logic ---
 const rooms = {};
@@ -71,6 +107,10 @@ app.get('/', (req, res) => {
 });
 
 server.listen(port, () => {
-  console.log(`Chat App running at http://localhost:${port}`);
-  console.log(`PeerJS endpoint: http://localhost:1445/peers`);
+  const protocol = isSSL ? 'https' : 'http';
+  console.log(`Chat App running at ${protocol}://localhost:${port}`);
+  console.log(`PeerJS endpoint: ${protocol}://localhost:1445/peers`);
+  if (isSSL) {
+    console.log('NOTE: Ensure your PeerClient connects using secure: true and correct port/protocol.');
+  }
 });
