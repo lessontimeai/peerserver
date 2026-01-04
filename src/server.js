@@ -64,9 +64,6 @@ if (isSSL) {
 
 const peerServer = PeerServer(peerOptions);
 
-// --- Real Room Logic ---
-const rooms = {};
-
 // --- Socket.IO Signaling Logic ---
 io.on('connection', (socket) => {
   console.log('a user connected:', socket.id);
@@ -99,12 +96,6 @@ io.on('connection', (socket) => {
 
 
 // --- API Endpoints ---
-app.get('/api/rooms/:roomId/peers', (req, res) => {
-  const { roomId } = req.params;
-  const peers = rooms[roomId] ? Array.from(rooms[roomId]) : [];
-  res.json(peers);
-});
-
 // Serve the app on root
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
