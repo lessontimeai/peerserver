@@ -82,14 +82,18 @@ io.on('connection', (socket) => {
       socket.emit('room-peers', peers);
     }
 
-    // Store peerId on the socket object for later retrieval
+    // Store peerId and roomId on the socket object for later retrieval
     socket.peerId = peerId;
+    socket.roomId = roomId;
   });
 
   socket.on('disconnect', () => {
     console.log('user disconnected:', socket.id);
-    // You might want to emit a 'peer-left' event to the room
-    // The logic to find which room the peer was in would be needed here
+    
+    // Emit room-left event to notify other peers
+    if (socket.roomId && socket.peerId) {
+      io.to(socket.roomId).emit('room-left', socket.peerId);
+    }
   });
 });
 
