@@ -22,9 +22,12 @@ class PeerClient {
     this.updateStatus("Connecting to Peer server...");
 
     // 1. Initialize PeerJS (to get a unique ID)
+    const url = new URL(this.serverUrl);
     this.peer = new Peer(undefined, {
       host: 'localhost', // Ensure this matches your server host
       port: 1445,
+      host: url.hostname,
+      //port: url.port || (url.protocol === 'https:' ? 443 : 80),
       path: this.peerPath,
       key: this.peerKey,
       debug: 1 // Errors only
@@ -71,29 +74,43 @@ class PeerClient {
     this.peer.on('connection', (conn) => {
       console.log('Incoming peer connection:', conn.peer);
       this.setupDataChannelEvents(conn);
+      this.handleConnection(conn);
     });
 
   }
 
   // New method to connect to a peer and set up data channel
   connectToNewPeer(peerId) {
+    if (this.connections[peerId]) return; // Prevent duplicate connections
     const conn = this.peer.connect(peerId, { reliable: true });
     this.connections[peerId] = conn;
     console.log('Attempting to connect to peer:', peerId);
+    this.handleConnection(conn);
+  }
+
+  // New method to set up data channel event listeners
+  handleConnection(conn) {
+    this.connections[conn.peer] = conn;
 
     conn.on('open', () => {
       console.log('Connected to peer:', peerId);
       // Now that the connection is open, setup data channel events
       this.setupDataChannelEvents(conn);
+      console.log('Connected to peer:', conn.peer);
     });
 
     conn.on('error', (err) => {
       console.error('Peer connection error:', err);
     });
+    conn.on('data', (data) => {
+      this.handleNewMessage(data);
+    });
 
     conn.on('close', () => {
       console.log('Peer connection closed:', peerId);
       delete this.connections[peerId];
+      console.log('Peer connection closed:', conn.peer);
+      delete this.connections[conn.peer];
     });
   }
 
@@ -101,6 +118,9 @@ class PeerClient {
   setupDataChannelEvents(conn) {
     conn.on('data', (data) => {
       this.handleNewMessage(data);
+    });
+    conn.on('error', (err) => {
+      console.error('Peer connection error:', err);
     });
   }
 
