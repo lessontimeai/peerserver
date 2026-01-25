@@ -157,9 +157,9 @@
                     return;
                 }
 
-                // --- Use peerserver.js for signaling, not a separate server ---
-                const SIGNALING_SERVER_URL = `http://localhost:1444`; // The main http server
-                this.peerClient = new PeerClient(SIGNALING_SERVER_URL, '/peers', 'peerjs');
+                const SIGNALING_SERVER_URL = window.location.origin;
+                const PEER_SERVER_URL = `${window.location.protocol}//${window.location.hostname}:1444`;
+                this.peerClient = new PeerClient(SIGNALING_SERVER_URL, '/peers', 'peerjs', PEER_SERVER_URL);
                 
                 this.setupPeerClientCallbacks();
 

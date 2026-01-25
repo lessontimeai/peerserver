@@ -1,6 +1,7 @@
 class PeerClient {
-  constructor(serverUrl, peerPath = '/peers', peerKey = 'peerjs') {
+  constructor(serverUrl, peerPath = '/peers', peerKey = 'peerjs', peerServerUrl = null) {
     this.serverUrl = serverUrl;
+    this.peerServerUrl = peerServerUrl || serverUrl;
     this.peerPath = peerPath;
     this.peerKey = peerKey;
 
@@ -22,14 +23,16 @@ class PeerClient {
     this.updateStatus("Connecting to Peer server...");
 
     // 1. Initialize PeerJS (to get a unique ID)
-    const url = new URL(this.serverUrl);
+    const peerUrl = new URL(this.peerServerUrl);
+    const peerPort = peerUrl.port
+      ? Number(peerUrl.port)
+      : (peerUrl.protocol === 'https:' ? 443 : 80);
     this.peer = new Peer(undefined, {
-      host: 'localhost', // Ensure this matches your server host
-      port: 1445,
-      host: url.hostname,
-      //port: url.port || (url.protocol === 'https:' ? 443 : 80),
+      host: peerUrl.hostname,
+      port: peerPort,
       path: this.peerPath,
       key: this.peerKey,
+      secure: peerUrl.protocol === 'https:',
       debug: 1 // Errors only
     });
 
@@ -91,24 +94,17 @@ class PeerClient {
   // New method to set up data channel event listeners
   handleConnection(conn) {
     this.connections[conn.peer] = conn;
+    this.setupDataChannelEvents(conn);
 
     conn.on('open', () => {
-      console.log('Connected to peer:', peerId);
-      // Now that the connection is open, setup data channel events
-      this.setupDataChannelEvents(conn);
       console.log('Connected to peer:', conn.peer);
     });
 
     conn.on('error', (err) => {
       console.error('Peer connection error:', err);
     });
-    conn.on('data', (data) => {
-      this.handleNewMessage(data);
-    });
 
     conn.on('close', () => {
-      console.log('Peer connection closed:', peerId);
-      delete this.connections[peerId];
       console.log('Peer connection closed:', conn.peer);
       delete this.connections[conn.peer];
     });

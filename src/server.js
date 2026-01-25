@@ -9,7 +9,8 @@ const { Server } = require("socket.io");
 require('dotenv').config();
 
 const app = express();
-const port = process.env.PORT || 1444;
+const wsport = process.env.WS_PORT || 1445;
+const peerPort = process.env.PEER_PORT || 1444;
 
 app.use(cors());
 
@@ -52,7 +53,7 @@ const io = new Server(server, {
 
 // --- Dedicated PeerJS server ---
 const peerOptions = {
-  port: 1445,
+  port: peerPort,
   path: '/peers',
   allow_discovery: false,
   debug: true,
@@ -101,10 +102,10 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-server.listen(port, () => {
+server.listen(wsport, () => {
   const protocol = isSSL ? 'https' : 'http';
-  console.log(`Chat App running at ${protocol}://localhost:${port}`);
-  console.log(`PeerJS endpoint: ${protocol}://localhost:1445/peers`);
+  console.log(`Chat App running at ${protocol}://localhost:${wsport}`);
+  console.log(`PeerJS endpoint: ${protocol}://localhost:${peerPort}/peers`);
   if (isSSL) {
     console.log('NOTE: Ensure your PeerClient connects using secure: true and correct port/protocol.');
   }
