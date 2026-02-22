@@ -158,7 +158,7 @@
                 }
 
                 const SIGNALING_SERVER_URL = window.location.origin;
-                const PEER_SERVER_URL = `${window.location.protocol}//${window.location.hostname}:1444`;
+                const PEER_SERVER_URL = window.location.origin;
                 this.peerClient = new PeerClient(SIGNALING_SERVER_URL, '/peers', 'peerjs', PEER_SERVER_URL);
                 
                 this.setupPeerClientCallbacks();

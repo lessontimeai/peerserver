@@ -46,8 +46,9 @@ if (sslKeyPath && sslCertPath) {
 }
 
 const io = new Server(server, {
+  path: '/rooms',
   cors: {
-    origin: "*", // Allow all origins for simplicity
+    origin: "*",
   },
 });
 
@@ -56,7 +57,6 @@ const peerOptions = {
   port: peerPort,
   path: '/peers',
   allow_discovery: false,
-  debug: true,
 };
 
 if (isSSL) {
@@ -99,6 +99,7 @@ io.on('connection', (socket) => {
 // --- API Endpoints ---
 // Serve the app on root
 app.get('/', (req, res) => {
+  console.log('Serving index.html');
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 

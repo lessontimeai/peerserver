@@ -42,7 +42,7 @@ class PeerClient {
         this.updateStatus(`Connected as ${id}`);
 
         // 2. Initialize Socket.io signaling
-        this.socket = io(this.serverUrl);
+        this.socket = io(this.serverUrl, { path: '/rooms' });
         this.setupSocketEvents(roomId);
         resolve(id);
       });

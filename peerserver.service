@@ -1,0 +1,19 @@
+[Unit]
+Description=PeerServer
+After=network.target
+
+[Service]
+Type=simple
+User=peerserver
+Group=peerserver
+WorkingDirectory=PLACE_WORKING_DIRECTORY_HERE
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run server
+Restart=always
+RestartSec=5
+# Optional: ensure a clean PATH for npm/node
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+[Install]
+WantedBy=multi-user.target
+
