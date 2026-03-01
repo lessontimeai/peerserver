@@ -85,6 +85,16 @@ io.on('connection', (socket) => {
     socket.roomId = roomId;
   });
 
+  socket.on('list-rooms', (callback) => {
+    const rooms = [];
+    for (const [roomId, sockets] of io.sockets.adapter.rooms.entries()) {
+      if (!io.sockets.sockets.has(roomId)) {
+        rooms.push({ roomId, peers: sockets.size });
+      }
+    }
+    callback(rooms);
+  });
+
   socket.on('disconnect', () => {
     console.log('user disconnected:', socket.id);
     
